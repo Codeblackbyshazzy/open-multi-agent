@@ -293,10 +293,16 @@ export class Agent {
       }
       // Auto-generate runId when onTrace is provided but runId is missing
       const needsRunId = callerOptions?.onTrace && !callerOptions.runId
+      // Create a fresh timeout signal per run (not per runner) so that
+      // each run() / prompt() call gets its own timeout window.
+      const timeoutSignal = this.config.timeoutMs !== undefined && this.config.timeoutMs > 0
+        ? AbortSignal.timeout(this.config.timeoutMs)
+        : undefined
       const runOptions: RunOptions = {
         ...callerOptions,
         onMessage: internalOnMessage,
         ...(needsRunId ? { runId: generateRunId() } : undefined),
+        ...(timeoutSignal ? { abortSignal: timeoutSignal } : undefined),
       }
 
       const result = await runner.run(messages, runOptions)
@@ -466,8 +472,12 @@ export class Agent {
       }
 
       const runner = await this.getRunner()
+      // Fresh timeout per stream call, same as executeRun.
+      const timeoutSignal = this.config.timeoutMs !== undefined && this.config.timeoutMs > 0
+        ? AbortSignal.timeout(this.config.timeoutMs)
+        : undefined
 
-      for await (const event of runner.stream(messages)) {
+      for await (const event of runner.stream(messages, timeoutSignal ? { abortSignal: timeoutSignal } : {})) {
         if (event.type === 'done') {
           const result = event.data as import('./runner.js').RunResult
           this.state.tokenUsage = addUsage(this.state.tokenUsage, result.tokenUsage)
